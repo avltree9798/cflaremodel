@@ -12,7 +12,6 @@
 - ✅ Fluent, chainable query builder (`where()`, `with_()`, `limit()` etc.)
 - ⚡ Async by default — built for modern Python 3.8+
 - 🔁 Eager and lazy loading of relationships
-- 📄 Schema introspection (`fillable`, `casts`, etc.)
 - ☁️ D1-first, but pluggable with other SQL drivers
 
 ---
@@ -61,20 +60,6 @@ class User(Model):
     async def posts(self):
         return await self.has_many(Post, "user_id")
 ```
-
----
-
-## 🧠 Schema Introspection
-
-```python
-User.introspect({
-    "name": {"type": "str"},
-    "email": {"type": "str"},
-    "created_at": {"type": "datetime"},
-    "hidden": ["password"]
-})
-```
-
 ---
 
 ## 📜 License
