@@ -21,6 +21,9 @@ class Model:
     casts = {}
     driver = None
 
+    def __iter__(self):
+        return iter(self.to_dict().items())
+
     def to_dict(self):
         """
         Serialise the model instance to a dictionary excluding hidden fields.

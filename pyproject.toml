@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cflaremodel"
-version = "0.1.4"
+version = "0.1.5"
 description = ""
 authors = ["Anthony Viriya <16130362+avltree9798@users.noreply.github.com>"]
 readme = "README.md"
