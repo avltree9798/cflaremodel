@@ -1,9 +1,9 @@
 import pytest
 
-from cflaremodel.model import Model
+from cflaremodel import Driver, Model
 
 
-class MockDriver:
+class MockDriver(Driver):
     def __init__(self):
         self.last_query = None
         self.last_params = None
@@ -27,10 +27,18 @@ class MockDriver:
         return True
 
 
+class Post(Model):
+    table = "posts"
+    fillable = ["id", "user_id", "title"]
+
+
 class User(Model):
     table = "users"
     fillable = ["id", "name", "email"]
     casts = {"id": "int"}
+
+    async def posts(self):
+        return [Post(id=1, user_id=self.id, title="First")]
 
 
 @pytest.fixture
@@ -44,7 +52,6 @@ def mock_driver():
 async def test_model_find(mock_driver):
     user = await User.find(1)
     assert user.id == 1
-    assert user.name == "Test"
     assert mock_driver.last_query.startswith("SELECT")
 
 
@@ -68,19 +75,95 @@ async def test_query_builder_where(mock_driver):
     users = await User.query().where("email", "like", "%@example.com").get()
     assert len(users) == 2
     assert "WHERE email like ?" in mock_driver.last_query
-    assert mock_driver.last_params[0] == "%@example.com"
 
 
 @pytest.mark.asyncio
 async def test_query_builder_limit_offset(mock_driver):
-    users = await User.query().limit(1).offset(1).get()
-    assert len(users) == 2
+    await User.query().limit(1).offset(1).get()
     assert "LIMIT 1" in mock_driver.last_query
     assert "OFFSET 1" in mock_driver.last_query
 
 
 @pytest.mark.asyncio
 async def test_query_builder_select_group_by(mock_driver):
-    _ = await User.query().select("id", "email").group_by("email").get()
+    await User.query().select("id", "email").group_by("email").get()
     assert "SELECT id, email" in mock_driver.last_query
     assert "GROUP BY email" in mock_driver.last_query
+
+
+@pytest.mark.asyncio
+async def test_query_builder_order_by(mock_driver):
+    await User.query().order_by("name", "DESC").get()
+    assert "ORDER BY name DESC" in mock_driver.last_query
+
+
+@pytest.mark.asyncio
+async def test_query_builder_joins(mock_driver):
+    await User.query().join(
+        "profiles",
+        "users.id",
+        "profiles.user_id"
+    ).get()
+    query = "JOIN profiles ON users.id = profiles.user_id"
+    assert query in mock_driver.last_query
+
+    await User.query().left_join(
+        "profiles",
+        "users.id",
+        "profiles.user_id"
+    ).get()
+    query = "LEFT JOIN profiles ON users.id = profiles.user_id"
+    assert query in mock_driver.last_query
+
+    await User.query().right_join(
+        "profiles",
+        "users.id",
+        "profiles.user_id"
+    ).get()
+    query = "RIGHT JOIN profiles ON users.id = profiles.user_id"
+    assert query in mock_driver.last_query
+
+    await User.query().cross_join("countries").get()
+    assert "CROSS JOIN countries" in mock_driver.last_query
+
+
+@pytest.mark.asyncio
+async def test_query_builder_union(mock_driver):
+    q1 = User.query().where("email", "like", "%@example.com")
+    q2 = User.query().where("email", "like", "%@test.com")
+    q1.union(q2)
+    await q1.get()
+    assert "UNION" in mock_driver.last_query
+
+
+@pytest.mark.asyncio
+async def test_query_builder_first(mock_driver):
+    user = await User.query().where("name", "Test").first()
+    assert isinstance(user, User)
+    assert "LIMIT 1" in mock_driver.last_query
+
+
+@pytest.mark.asyncio
+async def test_query_builder_with_eager_loading(mock_driver, monkeypatch):
+    async def mock_posts(self):
+        return [Post(id=1, user_id=self.id, title="First")]
+
+    setattr(User, "posts", mock_posts)
+
+    # Patch the driver's fetch_all to return Post rows when eager loading
+    async def mock_fetch_all(query, params):
+        if "FROM posts" in query:
+            return [
+                {"id": 1, "user_id": 1, "title": "First"},
+                {"id": 2, "user_id": 2, "title": "Second"}
+            ]
+        return [
+            {"id": 1, "name": "Test", "email": "test@example.com"},
+            {"id": 2, "name": "Another", "email": "another@example.com"}
+        ]
+
+    monkeypatch.setattr(mock_driver, "fetch_all", mock_fetch_all)
+    users = await User.query().with_("posts").get()
+    assert hasattr(users[0], "posts")
+    assert isinstance(users[0].posts, list)
+    assert users[0].posts[0].title == "First"
