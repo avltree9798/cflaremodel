@@ -102,6 +102,12 @@ class Model:
             return bool(value)
         elif type_ == "datetime":
             return datetime.fromisoformat(value)
+        elif type_ == "int":
+            return int(value)
+        elif type_ == "float":
+            return float(value)
+        elif type_ == "str":
+            return str(value)
         elif type_ == "json":
             return json.loads(value)
         return value
