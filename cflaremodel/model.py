@@ -80,9 +80,11 @@ class Model:
             **kwargs: Key-value pairs of attributes to
             set on the model instance.
         """
+        self._original = {}
         for key, value in kwargs.items():
             casted = self._cast(key, value)
             setattr(self, key, casted)
+            self._original[key] = casted
 
     def _cast(self, key, value):
         """
@@ -363,6 +365,49 @@ class Model:
             return related_cls(**result) if result else None
         results = await self.driver.fetch_all(query, binds)
         return [related_cls(**row) for row in results]
+
+    async def save(self):
+        """
+        Save the current state of the model to the database.
+
+        Detects changes in the model's attributes and updates the corresponding
+        row in the database.
+
+        Returns:
+            bool: True if the model was updated,
+            False if no changes were detected.
+        """
+        changes = {
+            key: value
+            for key, value in self.to_dict().items()
+            if key in self._original and self._original[key] != value
+        }
+
+        if not changes:
+            # No changes detected
+            return False
+
+        # Filter changes based on fillable fields
+        filtered_changes = {
+            k: v for k, v in changes.items() if self.is_fillable(k)
+        }
+
+        if not filtered_changes:
+            # No fillable changes detected
+            return False
+
+        # Build the update query
+        sets = ', '.join([f"{key} = ?" for key in filtered_changes])
+        values = list(filtered_changes.values()) + [self.id]
+        query = f"UPDATE {self.table} SET {sets} WHERE id = ?"
+
+        # Execute the update query
+        await self.driver.execute(query, values)
+
+        # Update the original state
+        self._original.update(filtered_changes)
+
+        return True
 
     @classmethod
     def query(cls):

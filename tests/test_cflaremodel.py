@@ -167,3 +167,28 @@ async def test_query_builder_with_eager_loading(mock_driver, monkeypatch):
     assert hasattr(users[0], "posts")
     assert isinstance(users[0].posts, list)
     assert users[0].posts[0].title == "First"
+
+
+@pytest.mark.asyncio
+async def test_model_save(mock_driver):
+    # Create a user instance with initial data
+    user = User(id=1, name="Old Name", email="old@example.com")
+
+    # Modify the user's attributes
+    user.name = "New Name"
+    user.email = "new@example.com"
+
+    # Call the save method to persist changes
+    result = await user.save()
+
+    # Assert that the save method detected changes and updated the database
+    assert result is True
+    query = "UPDATE users SET name = ?, email = ? WHERE id = ?"
+    assert query in mock_driver.last_query
+    assert mock_driver.last_params == ["New Name", "new@example.com", 1]
+
+    # Call save again without making any changes
+    result = await user.save()
+
+    # Assert that no changes were detected and no update query was executed
+    assert result is False
