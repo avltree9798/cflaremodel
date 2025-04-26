@@ -288,9 +288,12 @@ class Model:
         local_id = getattr(self, local_key)
         if local_id is None:
             return None
-        query = f"SELECT * FROM {related_cls.table} \
-            WHERE {foreign_key} = ? \
-                LIMIT 1"
+
+        query = f"SELECT * FROM {related_cls.table} WHERE {foreign_key} = ?"
+        if related_cls.soft_deletes:
+            query += " AND deleted_at IS NULL"
+        query += " LIMIT 1"
+
         result = await self.driver.fetch_one(query, [local_id])
         return related_cls(**result) if result else None
 
@@ -306,14 +309,14 @@ class Model:
         Returns:
             list: A list of related model instances.
         """
-        query = f"SELECT * FROM {related_cls.table} \
-            WHERE {foreign_key} = ?"
+        query = f"SELECT * FROM {related_cls.table} WHERE {foreign_key} = ?"
+        if related_cls.soft_deletes:
+            query += " AND deleted_at IS NULL"
+
         return await self._run_related_query(
             related_cls,
             query,
-            [
-                getattr(self, local_key)
-            ]
+            [getattr(self, local_key)]
         )
 
     async def belongs_to(self, related_cls, foreign_key, owner_key="id"):
@@ -332,16 +335,15 @@ class Model:
         owner_id = getattr(self, foreign_key, None)
         if owner_id is None:
             return None
-        query = (
-            f"SELECT * FROM {related_cls.table} "
-            f"WHERE {owner_key} = ?"
-        )
+
+        query = f"SELECT * FROM {related_cls.table} WHERE {owner_key} = ?"
+        if related_cls.soft_deletes:
+            query += " AND deleted_at IS NULL"
+
         return await self._run_related_query(
             related_cls,
             query,
-            [
-                owner_id
-            ],
+            [owner_id],
             one=True
         )
 

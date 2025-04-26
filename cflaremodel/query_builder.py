@@ -376,10 +376,12 @@ class QueryBuilder:
         Internal: Eager-load a single relation with nested support.
 
         Args:
-            instances (list): The list of model instances
-            to load relations for.
+            instances (list): The list of model instances.
             rel_name (str): The name of the relation to load.
             nested_with (dict): Nested relations to load recursively.
+
+        Raises:
+            ValueError: If the relationship is not explicitly defined.
         """
         if not instances:
             return
@@ -387,8 +389,12 @@ class QueryBuilder:
         sample_instance = instances[0]
         rel_method = getattr(type(sample_instance), rel_name, None)
 
+        # Enforce explicit relationship definition
         if not rel_method or not inspect.iscoroutinefunction(rel_method):
-            return
+            raise ValueError(
+                f"Relationship '{rel_name}' is not explicitly defined on "
+                f"{type(sample_instance).__name__}. Please define it first."
+            )
 
         bound = rel_method.__get__(sample_instance, type(sample_instance))
         relation_result = await bound()
@@ -434,96 +440,45 @@ class QueryBuilder:
         Internal: Eager-load has-many relationships.
 
         Args:
-            instances (list): The list of model instances
-            to load relations for.
+            instances (list): The list of model instances.
             rel_name (str): The name of the relation to load.
             relation_fn (function): The function to fetch the related data.
         """
+        # Get the first instance to bind the relation function
         sample_instance = instances[0]
         bound = relation_fn.__get__(sample_instance, type(sample_instance))
         sample_result = await bound()
 
-        if not sample_result or not isinstance(sample_result, list):
+        # If the relationship is already resolved, assign it directly
+        if sample_result is not None and isinstance(sample_result, list):
+            for inst in instances:
+                setattr(inst, rel_name, sample_result)
             return
 
-        related_cls = sample_result[0].__class__
-        foreign_key = None
-
-        for field in sample_result[0].__dict__:
-            if field.endswith('_id') and hasattr(sample_instance, 'id'):
-                foreign_key = field
-                break
-
-        if not foreign_key:
-            return
-
-        local_ids = [
-            getattr(inst, 'id')
-            for inst in instances
-            if hasattr(inst, 'id')
-        ]
-        if not local_ids:
-            return
-
-        placeholders = ",".join(["?"] * len(local_ids))
-        query = f"SELECT * FROM {related_cls.table} \
-            WHERE {foreign_key} \
-                IN ({placeholders})"
-        results = await self.driver.fetch_all(query, local_ids)
-
-        grouped = {}
-        for row in results:
-            key = row[foreign_key]
-            grouped.setdefault(key, []).append(related_cls(**row))
-
+        # If the relationship is not resolved, assign an empty list by default
         for inst in instances:
-            inst_id = getattr(inst, "id", None)
-            setattr(inst, rel_name, grouped.get(inst_id, []))
+            setattr(inst, rel_name, [])
 
     async def _eager_load_single(self, instances, rel_name, relation_fn):
         """
         Internal: Eager-load belongs-to or has-one relationships.
 
         Args:
-            instances (list): The list of model instances
-            to load relations for.
+            instances (list): The list of model instances.
             rel_name (str): The name of the relation to load.
             relation_fn (function): The function to fetch the related data.
         """
+        # Get the first instance to bind the relation function
         sample_instance = instances[0]
-        relation_result = await relation_fn.__get__(
-            sample_instance,
-            type(sample_instance)
-        )()
+        bound = relation_fn.__get__(sample_instance, type(sample_instance))
+        relation_result = await bound()
 
-        if relation_result is None:
+        # If the relationship is already resolved, assign it directly
+        if relation_result is not None:
+            for inst in instances:
+                setattr(inst, rel_name, relation_result)
             return
 
-        related_cls = relation_result.__class__
-
-        if hasattr(relation_result, "id"):
-            owner_key = "id"
-            fk_values = [
-                fk for inst in instances
-                if hasattr(inst, rel_name + "_id")
-                and (fk := getattr(inst, rel_name + "_id")) is not None
-            ]
-            if not fk_values:
-                return
-        else:
-            return
-
-        if not fk_values:
-            return
-
-        placeholders = ",".join(["?"] * len(fk_values))
-        query = f"SELECT * FROM {related_cls.table} \
-            WHERE {owner_key} \
-                IN ({placeholders})"
-        results = await self.driver.fetch_all(query, fk_values)
-
-        related_map = {row[owner_key]: related_cls(**row) for row in results}
-
+        # If the relationship is not resolved, assign None by default
         for inst in instances:
-            fk = getattr(inst, rel_name + "_id", None)
-            setattr(inst, rel_name, related_map.get(fk))
+            setattr(inst, rel_name, None)
